@@ -49,14 +49,21 @@ delete(#table_ref{pid = PID, spec = Spec}, Key) ->
   gen_server:call(PID, {delete, Key2, util:unixtime()}).
 
 -spec(update_element(Ref::#table_ref{}, Key::any(), ElementSpec::tuple() | list()) ->
-  {error, any()} | {ok, Data}).
+  {error, any()} | {ok, Data::any()}).
 update_element(Ref, Key, ElementSpec) when is_tuple(ElementSpec) ->
   update_element(Ref, Key, [ElementSpec]);
 update_element(#table_ref{pid = PID, spec = Spec}, Key, ElementSpec)
     when is_list(ElementSpec) ->
-  ElementSpec2 = lib_spec:encode_element_spec(Spec, ElementSpec),
-  Key2 = lib_spec:encode_key(Spec, Key),
-  case gen_server:call(PID, {update_element, Key2, ElementSpec2, util:unixtime()}) of
-    {ok, Data} -> {ok, lib_spec:decode_data(Spec, Data)};
-    Error -> Error
+  case lib_spec:check_element_spec(Spec, ElementSpec) of
+    {false, Reason} ->
+      ?ERROR("check element spec ~p failed, reason ~p", [Reason]),
+      {error, Reason};
+    true ->
+      ElementSpec2 = lib_spec:encode_element_spec(Spec, ElementSpec),
+      ElementSpec3 = lib_table:filter_dup_element_spec(ElementSpec2),
+      Key2 = lib_spec:encode_key(Spec, Key),
+      case gen_server:call(PID, {update_element, Key2, ElementSpec3, util:unixtime()}) of
+        {ok, Data} -> {ok, lib_spec:decode_data(Spec, Data)};
+        Error -> Error
+      end
   end.

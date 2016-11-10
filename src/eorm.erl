@@ -51,7 +51,7 @@ insert(Table, Data) ->
     {ok, Ref} -> mod_table:insert(Ref, Data)
   end.
 
--spec(insert(Table::atom(), Data::data()) ->
+-spec(insert_new(Table::atom(), Data::data()) ->
   {error, any()} | ok).
 insert_new(Table, Data) ->
   case eorm_server:get_table(Table) of
@@ -68,7 +68,7 @@ delete(Table, Key) ->
   end.
 
 -spec(update_element(Table::atom(), Key::any(), ElementSpec::tuple() | list()) ->
-  {error, Reason} | {ok, Data}).
+  {error, Reason::any()} | {ok, Data::any()}).
 update_element(Table, Key, ElementSpec) ->
   case eorm_server:get_table(Table) of
     {error, Reason} -> {error, Reason};

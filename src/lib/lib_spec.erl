@@ -23,6 +23,7 @@
   decode_data/2,
   encode_key/2,
   encode_element_spec/2,
+  check_element_spec/2,
   load_spec_module/1,
   module_name/1]).
 
@@ -167,4 +168,13 @@ load_spec_module(#data_spec{module = {Module, Bin}}) ->
     {ok, Module} -> ok;
     {error, Reason} -> {error, Reason};
     _ -> {error, ?ER_LOAD_ENCODE_MODULE_FAILED}
+  end.
+
+-spec(check_element_spec(Spec::spec(), ElementSpec::list()) -> {false, any()} | true).
+check_element_spec(_Spec, []) -> true;
+check_element_spec(Spec = #data_spec{fields = Fields}, [{K, _} | L]) ->
+  case lists:keyfind(K, 1, Fields) of
+    false -> {error, ?ER_UPDATE_ELEMENT_NOT_FOUND};
+    {_, igore, _} -> {error, ?ER_UPDATE_IGNORE_ELEMENT};
+    _     -> check_element_spec(Spec, L)
   end.

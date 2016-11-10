@@ -72,8 +72,8 @@ start_link(Table, Spec, Opts) ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([Table, Spec, Opts]) ->
-  DBModule = proplists:get_value(db_module, Opts, mod_mysql),
+init([Table, Spec, _Opts]) ->
+  DBModule = application:get_env(eorm, db_module, mod_mysql),
   timer:send_after(0, self(), {clean_dets}),
   State = #state{name = Table, spec = Spec, db_module = DBModule, ets = init_cache(Table),
     status = ?TABLE_STATUS_INIT},
@@ -149,9 +149,9 @@ handle_call({update_element, Key, ElementSpec, Current}, _From, State) ->
           Data2 = lib_table:update_data(Data, ElementSpec),
           ets:update_element(EtsTable, Key, [{#data_cache.ts, Current}, {#data_cache.data, Data2}]),
           dets:insert(DetsTable, #exec_info{key = Key, xmit = 0, resent_ts = Current,
-            data = ElementSpec, action = ?DB_ACTION_UPDATE})
-      end,
-      {reply, {ok, Data2}, State}
+            data = ElementSpec, action = ?DB_ACTION_UPDATE}),
+          {reply, {ok, Data2}, State}
+      end
   end;
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
@@ -296,15 +296,17 @@ proc_lookup(State = #state{ets = EtsTable}, Key) ->
 
 -spec(proc_db_lookup(State::#state{}, Key::any()) ->
   {error, any()} | {ok, undefined} | {ok, term()}).
-proc_db_lookup(#state{lookup = Lookup, db_module = DBModule, ets = EtsTable}, Key) ->
+proc_db_lookup(#state{lookup = Lookup, db_module = DBModule, ets = EtsTable, spec = Spec}, Key) ->
   Rslt = case Lookup of
-    undefined -> lib_db:execute(DBModule, #exec_info{key = Key});
-    _ -> lib_db:exec_prepare(DBModule, Lookup, Key)
+    undefined -> lib_db:execute(DBModule, Spec, #exec_info{key = Key});
+    _ -> lib_db:exec_prepare(DBModule, Lookup, Spec, #exec_info{key = Key})
   end,
   case Rslt of
-    {ok, undefined} -> {ok, undefined};
-    {ok, Data} ->
+    {ok, #db_data_rslt{}} ->
+      Data = lib_table:build_data(Spec, Rslt),
       ets:insert(EtsTable, #data_cache{key = Key, data = Data}), {ok, Data};
+    {ok, #db_ok_rslt{}} ->
+      {error, ?ER_RESULT_FORMAT_ERROR};
     Error -> Error
   end.
 
@@ -320,8 +322,8 @@ proc_flush(State = #state{dets = DetsTable}) ->
   end,
   State.
 
-proc_flush2(State = #state{dets = DetsTable, db_module = DBModule}, Infos, Cont, Finished) ->
-  ExecRslt = [proc_flush3(I, DBModule) || I <- Infos],
+proc_flush2(State = #state{dets = DetsTable, db_module = DBModule, spec = Spec}, Infos, Cont, Finished) ->
+  ExecRslt = [proc_flush3(I, DBModule, Spec) || I <- Infos],
   Finished2 = [K || {ok, K} <- ExecRslt] ++ Finished,
   case dets:match(Cont) of
     '$end_of_table' -> State;
@@ -332,10 +334,10 @@ proc_flush2(State = #state{dets = DetsTable, db_module = DBModule}, Infos, Cont,
       proc_flush2(State, Infos2, Cont2, Finished2)
   end.
 
-proc_flush3(Info = #exec_info{action = Action, key = Key}, DBModule) ->
+proc_flush3(Info = #exec_info{action = Action, key = Key}, DBModule, Spec) ->
   Rslt = case lib_table:get_prepare(Action) of
-    undefined -> lib_db:execute(DBModule, Info);
-    Prepare   -> lib_db:exec_prepare(DBModule, Prepare, Info)
+    undefined -> lib_db:execute(DBModule, Spec, Info);
+    Prepare   -> lib_db:exec_prepare(DBModule, Prepare, Spec, Info)
   end,
   case Rslt of
     ok -> {ok, Key};

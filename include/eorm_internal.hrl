@@ -20,6 +20,9 @@
 -define(IF(C, T, F), case C of true -> T; false -> F end).
 -define(FORMAT_BIN(F, A), list_to_binary(io_lib:format(F, A))).
 
+-define(MYSQL_POOL_NAME, eorm_emysql_pool).
+-define(MYSQL_POOL_SIZE, 16).
+
 -define(FLUSH_INTERVAL, 5 * 60 * 1000).
 -define(FLUSH_PROC_CNT, 100).
 

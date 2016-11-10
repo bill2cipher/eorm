@@ -8,7 +8,6 @@
 %%%-------------------------------------------------------------------
 -author("jellybean4").
 
-
 -define(ER_TABLE_EXIST, table_exist).
 -define(ER_TABLE_NOT_EXIST, table_not_exist).
 -define(ER_TABLE_STATUS_NOT_RUN, table_not_run).
@@ -27,3 +26,7 @@
 
 
 -define(ER_UNSUPPORTED_PREPARE, unsupported_prepare).
+-define(ER_UNSUPPORTED_EXECUTE, unsupported_execute).
+-define(ER_RESULT_FORMAT_ERROR, result_format_error).
+-define(ER_UPDATE_ELEMENT_NOT_FOUND, update_element_not_found).
+-define(ER_UPDATE_IGNORE_ELEMENT, update_ignore_element).

@@ -20,7 +20,7 @@
 %%====================================================================
 
 start_link() ->
-  ets:new(?REGISTRY, public, named_table, [{keypos, #cache_ref.name}]),
+  ets:new(?REGISTRY, [public, named_table, {keypos, #table_ref.name}]),
   supervisor:start_link({local, ?SERVER}, ?MODULE, []).
 
 %%====================================================================

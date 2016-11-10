@@ -8,9 +8,6 @@
 %%%-------------------------------------------------------------------
 -author("jellybean4").
 
--type spec() :: #data_spec{}.
--type data() :: list() | tuple().
-
 -record(data_spec, {
   name :: string(),
   type :: tuple | map,
@@ -18,3 +15,6 @@
   key :: integer(),
   module :: {module(), binary()}
 }).
+
+-type spec() :: #data_spec{}.
+-type data() :: list() | tuple().

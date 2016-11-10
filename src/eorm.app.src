@@ -5,7 +5,10 @@
   {mod, { eorm_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    sasl,
+    lager,
+    emysql
    ]},
   {env,[]},
   {modules, []},
