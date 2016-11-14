@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:03
 %%%-------------------------------------------------------------------
--module(lib_db).
+-module(eorm_lib_db).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 %% API
@@ -38,7 +38,7 @@ load_keys(DBModule, Spec) ->
   end.
 
 -spec(execute(DBModule::module(), Spec::spec(), Info::#exec_info{}) ->
-  {error, any()} | {ok, #db_ok_rslt{}}).
+  {error, any()} | {ok, #db_ok_rslt{}} | {ok, #db_data_rslt{}}).
 execute(DBModule, Spec, Info) ->
   DBModule:execute(Spec, Info).
 

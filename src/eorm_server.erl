@@ -49,21 +49,31 @@ start_link() ->
 -spec(new_table(Table::atom(), Spec::spec(), Opts::list()) ->
   {ok, #table_ref{}} | {error, any()}).
 new_table(Table, Spec, Opts) when is_atom(Table) andalso is_list(Opts) ->
-  case lib_spec:check_spec(Spec) of
+  case eorm_lib_spec:check_spec(Spec) of
     {false, Reason} -> {error, Reason};
     true ->
-      case lib_spec:load_spec_module(Spec) of
+      case eorm_lib_spec:load_spec_module(Spec) of
         {error, Reason} -> {error, Reason};
-        ok ->
-          Spec2 = Spec#data_spec{module = {lib_spec:module_name(Spec), undefined}},
-          Spec3 = lib_spec:sort_fields(Spec2),
-          gen_server:call(?SERVER, {new_table, Table, Spec3, Opts})
+        ok -> new_table_proc(Table, Spec, Opts)
       end
+  end.
+
+new_table_proc(Table, Spec, Opts) ->
+  Spec2 = Spec#data_spec{module = {eorm_lib_spec:module_name(Spec), undefined}},
+  Spec3 = eorm_lib_spec:sort_fields(Spec2),
+  case gen_server:call(?SERVER, {new_table, Table, Spec3, Opts}, infinity) of
+    {error, Reason} -> {error, Reason};
+    {ok, Ref} -> wait4_notify(Table, ?TABLE_STATUS_RUN), {ok, Ref}
   end.
 
 -spec(close_table(Table::atom()) -> ok | {error, any()}).
 close_table(Table) when is_atom(Table) ->
-  gen_server:call(?SERVER, {close_table, Table}).
+  case gen_server:call(?SERVER, {close_table, Table}, infinity) of
+    {error, Reason} -> {error, Reason};
+    ok ->
+      wait4_notify(Table, ?TABLE_STATUS_DOWN),
+      ok
+  end.
 
 -spec(get_table(Table::atom()) -> {error, any()} | {ok, Ref::any()}).
 get_table(Table) when is_atom(Table) ->
@@ -121,23 +131,27 @@ init([]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call({new_table, Table, Spec, Opts}, _From, State = #state{monitors = Monitors}) ->
+handle_call({new_table, Table, Spec, Opts}, {ReqPID, _}, State = #state{monitors = Monitors}) ->
   case ets:lookup(?REGISTRY, Table) of
     [#table_ref{}] -> {reply, {error, ?ER_TABLE_EXIST}, State};
     [] ->
       case start_table(Table, Spec, Opts) of
         {error, Reason} -> {reply, {error, Reason}, State};
         {ok, Ref = #table_ref{pid = PID}} ->
+          registry_notify(Table, ?TABLE_STATUS_RUN, ReqPID),
+          notify_registers(Table, ?TABLE_STATUS_INIT),
           MonitorRef = erlang:monitor(process, PID),
           {reply, {ok, Ref}, State#state{monitors = [{MonitorRef, Table} | Monitors]}}
       end
   end;
-handle_call({close_table, Table}, _From, State) ->
+handle_call({close_table, Table}, {ReqPID, _}, State) ->
   case ets:lookup(?REGISTRY, Table) of
     [] -> {reply, {error, ?ER_TABLE_NOT_EXIST}, State};
     [#table_ref{status = ?TABLE_STATUS_CLOSE}] -> {reply, {error, ?ER_TABLE_IS_CLOSE}, State};
     [#table_ref{pid = PID}] ->
-      PID ! {stop, close_table},
+      gen_server:cast(PID, {stop, close_table}),
+      registry_notify(Table, ?TABLE_STATUS_DOWN, ReqPID),
+      notify_registers(Table, ?TABLE_STATUS_CLOSE),
       ets:update_element(?REGISTRY, Table, [{#table_ref.status, ?TABLE_STATUS_CLOSE}]),
       {reply, ok, State}
   end;
@@ -157,10 +171,12 @@ handle_call(Request, _From, State) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
 handle_cast({update_status, Table, Status}, State) ->
+  ?DEBUG("table ~p status changed into ~p", [Table, Status]),
   case ets:lookup(?REGISTRY, Table) of
     [] -> {noreply, State};
     [#table_ref{}] ->
       ets:update_element(?REGISTRY, Table, [{#table_ref.status, Status}]),
+      notify_registers(Table, Status),
       {noreply, State}
   end;
 handle_cast(_Request, State) ->
@@ -180,13 +196,14 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_info({'DOWN', Ref, prcocess, _PID, Reason}, State = #state{monitors = Monitors}) ->
+handle_info({'DOWN', Ref, process, _PID, Reason}, State = #state{monitors = Monitors}) ->
   case lists:keyfind(Ref, 1, Monitors) of
     false -> {noreply, State};
     {Ref, Table} ->
       ?INFO("table ~p exit with reason ~p", [Table, Reason]),
       ets:delete(?REGISTRY, Table),
       Monitors2 = lists:keydelete(Ref, 1, Monitors),
+      notify_registers(Table, ?TABLE_STATUS_DOWN),
       {noreply, State#state{monitors = Monitors2}}
   end;
 handle_info(_Info, State) ->
@@ -228,10 +245,33 @@ code_change(_OldVsn, State, _Extra) ->
 -spec(start_table(Table::atom(), Spec::spec(), Opts::list()) ->
   {error, any()} | {ok, #table_ref{}}).
 start_table(Table, Spec, Opts) ->
-  case sup_table:start_table(Table, Spec, Opts) of
+  case eorm_sup_table:start_table(Table, Spec, Opts) of
     {error, Reason} -> {error, Reason};
     {ok, PID} ->
       Ref = #table_ref{name = Table, pid = PID, spec = Spec, status = ?TABLE_STATUS_INIT},
       ets:insert(?REGISTRY, Ref),
       {ok, Ref}
+  end.
+
+registry_notify(Table, Status, PID) ->
+  Key = {Table, Status},
+  case ets:lookup(?STATUS_NOTIFY, Key) of
+    [] -> ets:insert(?STATUS_NOTIFY, {Key, [PID]});
+    [{Key, PList}] ->
+      ets:insert(?STATUS_NOTIFY, {Key, [PID | PList]})
+  end.
+
+notify_registers(Table, Status) ->
+  ?DEBUG("notify table ~p for status change to ~p", [Table, Status]),
+  Key = {Table, Status},
+  case ets:lookup(?STATUS_NOTIFY, Key) of
+    [] -> ignore;
+    [{_, PList}] ->
+      [P ! Key || P <- PList],
+      ets:delete(?STATUS_NOTIFY, Key)
+  end.
+
+wait4_notify(Table, Status) ->
+  receive
+    {Table, Status} -> ignore
   end.

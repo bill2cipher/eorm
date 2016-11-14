@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:04
 %%%-------------------------------------------------------------------
--module(lib_spec).
+-module(eorm_lib_spec).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 %% API
@@ -76,7 +76,7 @@ check_spec_module(Spec) ->
 check_spec_key(#data_spec{key = Key, fields = Fields}) ->
   case lists:keyfind(Key, 1, Fields) of
     false -> {error, ?ER_SPEC_KEY_NOT_FOUND};
-    true  -> true
+    _  -> true
   end.
 
 check_tuple_fields(#data_spec{fields = Fields}) ->
@@ -165,7 +165,7 @@ encode_element_spec(#data_spec{module = {Module, _}}, ElementSpec) ->
 
 load_spec_module(#data_spec{module = {Module, Bin}}) ->
   case code:load_binary(Module, atom_to_list(Module), Bin) of
-    {ok, Module} -> ok;
+    {module, Module} -> ok;
     {error, Reason} -> {error, Reason};
     _ -> {error, ?ER_LOAD_ENCODE_MODULE_FAILED}
   end.

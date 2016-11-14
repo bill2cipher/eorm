@@ -20,8 +20,15 @@
 %%====================================================================
 
 start_link() ->
-  ets:new(?REGISTRY, [public, named_table, {keypos, #table_ref.name}]),
-  supervisor:start_link({local, ?SERVER}, ?MODULE, []).
+  case lib_db:start() of
+    {error, Reason} ->
+      ?ERROR("db service start failed, reason ~p", [Reason]),
+      exit(Reason);
+    ok ->
+      ets:new(?REGISTRY, [public, named_table, {keypos, #table_ref.name}]),
+      ets:new(?STATUS_NOTIFY, [public, named_table, {keypos, 1}]),
+      supervisor:start_link({local, ?SERVER}, ?MODULE, [])
+  end.
 
 %%====================================================================
 %% Supervisor callbacks

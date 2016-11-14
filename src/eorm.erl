@@ -16,8 +16,7 @@
   lookup/2,
   insert/2,
   insert_new/2,
-  delete/2,
-  update_element/3
+  delete/2
 ]).
 
 -spec(new(Table::atom(), Spec :: spec(), Opts::list()) ->
@@ -40,7 +39,7 @@ close(Table) ->
 lookup(Table, Key) ->
   case eorm_server:get_table(Table) of
     {error, Reason} -> {error, Reason};
-    {ok, Ref} -> mod_table:lookup(Ref, Key)
+    {ok, Ref} -> eorm_mod_table:lookup(Ref, Key)
   end.
 
 -spec(insert(Table::atom(), Data::data()) ->
@@ -48,7 +47,7 @@ lookup(Table, Key) ->
 insert(Table, Data) ->
   case eorm_server:get_table(Table) of
     {error, Reason} -> {error, Reason};
-    {ok, Ref} -> mod_table:insert(Ref, Data)
+    {ok, Ref} -> eorm_mod_table:insert(Ref, Data)
   end.
 
 -spec(insert_new(Table::atom(), Data::data()) ->
@@ -56,7 +55,7 @@ insert(Table, Data) ->
 insert_new(Table, Data) ->
   case eorm_server:get_table(Table) of
     {error, Reason} -> {error, Reason};
-    {ok, Ref} -> mod_table:insert_new(Ref, Data)
+    {ok, Ref} -> eorm_mod_table:insert_new(Ref, Data)
   end.
 
 -spec(delete(Table::atom(), Key::any()) ->
@@ -64,13 +63,6 @@ insert_new(Table, Data) ->
 delete(Table, Key) ->
   case eorm_server:get_table(Table) of
     {error, Reason} -> {error, Reason};
-    {ok, Ref} -> mod_table:delete(Ref, Key)
+    {ok, Ref} -> eorm_mod_table:delete(Ref, Key)
   end.
 
--spec(update_element(Table::atom(), Key::any(), ElementSpec::tuple() | list()) ->
-  {error, Reason::any()} | {ok, Data::any()}).
-update_element(Table, Key, ElementSpec) ->
-  case eorm_server:get_table(Table) of
-    {error, Reason} -> {error, Reason};
-    {ok, Ref} -> mod_table:update_element(Ref, Key, ElementSpec)
-  end.

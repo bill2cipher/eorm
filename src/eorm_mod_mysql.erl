@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:03
 %%%-------------------------------------------------------------------
--module(mod_mysql).
+-module(eorm_mod_mysql).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 
@@ -46,6 +46,7 @@ prepare(Action, Spec) ->
   case lib_mysql:build_prepare(Action, Spec) of
     {error, Reason} -> {error, Reason};
     Cmd ->
+      ?DEBUG("build prepare ~p for action ~p with cmd ~p", [Prepare, Action, Cmd]),
       lib_mysql:prepare(Prepare, Cmd),
       {ok, Prepare}
   end.
@@ -88,17 +89,22 @@ execute(Spec, #exec_info{action = Action}) ->
 -spec(exec_prepare(Prepare::atom(), Spec::spec(), Info::#exec_info{}) ->
   {error, any()} | {ok, #db_ok_rslt{}} | {ok, #db_data_rslt{}}).
 exec_prepare(Prepare, Spec, Info) ->
-  Args = lib_mysql:build_prepare_args(Info, Spec),
-  case lib_mysql:exec_prepare(Prepare, Args) of
-    #error_packet{msg = Reason} ->
-      ?ERROR("mod_mysql exec_prepare ~p for spec ~p failed, reason ~p", [Prepare, Spec, Reason]),
-      {error, Reason};
-    #result_packet{rows = Rows, field_list = Fields} ->
-      ?DEBUG("mod_mysql exec_prepare ~p success", [Prepare]),
-      {ok, #db_data_rslt{rows = Rows , fields = Fields}};
-    #ok_packet{} ->
-      ?DEBUG("mod_mysql exec_prepare ~p success", [Prepare]),
-      {ok, #db_ok_rslt{}}
+  case lib_mysql:build_prepare_args(Info, Spec) of
+    {error, Reason} -> {error, Reason};
+    {ok, Args} ->
+      ?DEBUG("execute prepare ~p with args ~p", [Prepare, Args]),
+      case lib_mysql:exec_prepare(Prepare, Args) of
+        #error_packet{msg = Reason} ->
+          ?ERROR("mod_mysql exec_prepare ~p for spec ~p failed, reason ~p", [Prepare, Spec, Reason]),
+          {error, Reason};
+        #result_packet{rows = Rows, field_list = Fields} ->
+          ?DEBUG("mod_mysql exec_prepare ~p success", [Prepare]),
+          {ok, #db_data_rslt{rows = Rows , fields = Fields}};
+        #ok_packet{} ->
+          ?DEBUG("mod_mysql exec_prepare ~p success", [Prepare]),
+          {ok, #db_ok_rslt{}}
+      end
   end.
+
 prepare_name(TableName, Action) ->
-  list_to_atom(io_lib:format("~s_~s", [TableName, Action])).
+  erlang:binary_to_atom(?FORMAT_BIN("~s_~s", [TableName, Action]), latin1).

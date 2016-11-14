@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:11
 %%%-------------------------------------------------------------------
--module(sup_table).
+-module(eorm_sup_table).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 -behaviour(supervisor).

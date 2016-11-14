@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:03
 %%%-------------------------------------------------------------------
--module(proc_table).
+-module(eorm_proc_table).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 -behaviour(gen_server).
@@ -74,7 +74,7 @@ start_link(Table, Spec, Opts) ->
   {stop, Reason :: term()} | ignore).
 init([Table, Spec, _Opts]) ->
   DBModule = application:get_env(eorm, db_module, mod_mysql),
-  timer:send_after(0, self(), {clean_dets}),
+  timer:send_after(0, self(), clean_dets),
   State = #state{name = Table, spec = Spec, db_module = DBModule, ets = init_cache(Table),
     status = ?TABLE_STATUS_INIT},
   case init_table([fun init_dets/1, fun init_key_ets/1, fun init_prepare/1], State) of
@@ -97,6 +97,10 @@ init([Table, Spec, _Opts]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
+handle_call(_, _, State = #state{status = ?TABLE_STATUS_INIT}) ->
+  {reply, {error, ?ER_TABLE_STATUS_NOT_RUN}, State};
+handle_call(_, _, State = #state{status = ?TABLE_STATUS_CLOSE}) ->
+  {reply, {error, ?ER_TABLE_STATUS_NOT_RUN}, State};
 handle_call({lookup, Key, Current}, _From, State) ->
   case ets:lookup(State#state.key_ets, Key) of
     [] -> {reply, {ok, undefined}, State};
@@ -170,7 +174,7 @@ handle_call(_Request, _From, State) ->
 handle_cast({stop, Reason}, State = #state{name = Name}) ->
   ?INFO("table ~p process shutdown, reason ~p", [Name, Reason]),
   State2 = proc_flush(State),
-  {noreply, {shutdown, Reason}, State2};
+  {stop, {shutdown, Reason}, State2};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -192,7 +196,7 @@ handle_info(clean_dets, State) ->
   State2 = proc_flush(State),
   timer:send_after(?FLUSH_INTERVAL, self(), flush),
   eorm_server:update_table_status(State#state.name, ?TABLE_STATUS_RUN),
-  {noreply, State2};
+  {noreply, State2#state{status = ?TABLE_STATUS_RUN}};
 handle_info(flush, State) ->
   State2 = proc_flush(State),
   timer:send_after(?FLUSH_INTERVAL, self(), flush),
@@ -318,18 +322,19 @@ proc_flush(State = #state{dets = DetsTable}) ->
       ?ERROR("dets ~p match failed, reason ~p", [DetsTable, Reason]);
     {Infos, Cont} ->
       Finished = proc_flush2(State, Infos, Cont, []),
+      ?DEBUG("proc flush success for ~p", [Finished]),
       [dets:delete(DetsTable, K) || K <- Finished]
   end,
   State.
 
 proc_flush2(State = #state{dets = DetsTable, db_module = DBModule, spec = Spec}, Infos, Cont, Finished) ->
-  ExecRslt = [proc_flush3(I, DBModule, Spec) || I <- Infos],
+  ExecRslt = [proc_flush3(I, DBModule, Spec) || [I] <- Infos],
   Finished2 = [K || {ok, K} <- ExecRslt] ++ Finished,
   case dets:match(Cont) of
-    '$end_of_table' -> State;
+    '$end_of_table' -> Finished2;
     {error, Reason} ->
       ?ERROR("dets ~p match failed, reason ~p", [DetsTable, Reason]),
-      State;
+      Finished2;
     {Infos2, Cont2} ->
       proc_flush2(State, Infos2, Cont2, Finished2)
   end.
@@ -340,6 +345,6 @@ proc_flush3(Info = #exec_info{action = Action, key = Key}, DBModule, Spec) ->
     Prepare   -> lib_db:exec_prepare(DBModule, Prepare, Spec, Info)
   end,
   case Rslt of
-    ok -> {ok, Key};
+    {ok, _} -> {ok, Key};
     _  -> {error, Key}
   end.

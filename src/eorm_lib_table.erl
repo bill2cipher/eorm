@@ -6,7 +6,7 @@
 %%% @end
 %%% Created : 08. 十一月 2016 23:03
 %%%-------------------------------------------------------------------
--module(lib_table).
+-module(eorm_lib_table).
 -author("jellybean4").
 -include("eorm_internal.hrl").
 %% API
@@ -16,6 +16,7 @@
   resent_ts/2,
   update_data/2,
   build_data/2,
+  swap_dets_name/1,
   filter_dup_element_spec/1]).
 
 set_prepare(Action, Name) ->
@@ -72,3 +73,6 @@ build_data(#data_spec{type = map, fields = Fields}, #db_data_rslt{rows = Rows, f
       _      -> {Data#{K => lists:nth(Idx, Rows)}, Idx + 1}
     end end, {#{}, 1}, Fields),
   Rslt.
+
+swap_dets_name(Table) ->
+  erlang:binary_to_atom(?FORMAT_BIN("~s_swap", [Table]), latin1).
