@@ -45,7 +45,7 @@
 -define(TABLE_STATUS_DOWN, down).
 
 -record(table_ref, {name, pid, spec, status}).
--record(part_table_ref, {id, pid, spec, status}).
+-record(part_table_ref, {id, pid, spec}).
 
 -record(data_cache, {key, data, ts, ver}).
 -record(exec_info, {key, xmit, resent_ts, data, action, ver}).

@@ -17,8 +17,7 @@
   new_table/3,
   close_table/1,
   get_table/1,
-  update_table_status/2,
-  update_part_ref/2
+  update_table_status/2
 ]).
 %% gen_server callbacks
 -export([init/1,
@@ -86,11 +85,7 @@ get_table(Table) when is_atom(Table) ->
 
 -spec(update_table_status(Table::atom(), Status::table_status()) -> ok).
 update_table_status(Table, Status) when is_atom(Table) andalso is_atom(Status) ->
-  gen_server:cast(?SERVER, {update_status, Table, Status}),
-  ok.
-
-update_part_ref(Table, ID) ->
-  gen_server:cast(?SERVER, {update_part_status, Table, ID, self()}),
+  gen_server:cast(?SERVER, {update_status, Table, self(), Status}),
   ok.
 
 %%%===================================================================
@@ -175,15 +170,11 @@ handle_call(Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({update_status, Table, Status}, State) ->
+handle_cast({update_status, Table, MgrPID, Status}, State) ->
   ?DEBUG("table ~p status changed into ~p", [Table, Status]),
-  case ets:lookup(?REGISTRY, Table) of
-    [] -> {noreply, State};
-    [#table_ref{}] ->
-      ets:update_element(?REGISTRY, Table, [{#table_ref.status, Status}]),
-      notify_registers(Table, Status),
-      {noreply, State}
-  end;
+  ets:insert(?REGISTRY, #table_ref{name = Table, status = Status, pid = MgrPID}),
+  notify_registers(Table, Status),
+  {noreply, State};
 handle_cast(_Request, State) ->
   {noreply, State}.
 

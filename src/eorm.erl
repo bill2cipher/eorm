@@ -35,15 +35,15 @@ close(Table) ->
 -spec(lookup(Table::atom(), Key ::any()) ->
   {error, any()} | {ok, undefined} | {ok, Data :: any()}).
 lookup(Table, Key) ->
-  case eorm_server:get_table(Table) of
+  case eorm_server:get_table(Table, Key) of
     {error, Reason} -> {error, Reason};
     {ok, Ref} -> eorm_mod_table:lookup(Ref, Key)
   end.
 
 -spec(insert(Table::atom(), Data::data()) ->
   {error, any()} | ok).
-insert(Table, Data) ->
-  case eorm_server:get_table(Table) of
+insert(Table, Key, Data) ->
+  case eorm_server:get_table(Table, Key) of
     {error, Reason} -> {error, Reason};
     {ok, Ref} -> eorm_mod_table:insert(Ref, Data)
   end.
