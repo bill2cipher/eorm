@@ -13,6 +13,7 @@
 
 %% API
 -export([start_link/0,
+  get_table_mgr/1,
   start_table/3]).
 
 %% Supervisor callbacks
@@ -26,8 +27,16 @@
 -spec(start_table(Table::atom(), Spec::spec(), Opts::list()) ->
   {ok, pid()} | {error, any()}).
 start_table(Table, Spec, Opts) ->
-  supervisor:start_child(?SERVER, [Table, Spec, Opts]).
+  TableMgr = {Table, {eorm_mgr_table, start_link, [Table, Spec, Opts]},
+    transient, infinity, worker, [eorm_mgr_table]},
+  supervisor:start_child(?SERVER, TableMgr).
 
+get_table_mgr(Table) ->
+  Children = supervisor:which_children(?SERVER),
+  case lists:keyfind(Table, 1, Children) of
+    false -> {error, ?ER_TABLE_NOT_EXIST};
+    {Table, PID, _, _} -> PID
+  end.
 %%--------------------------------------------------------------------
 %% @doc
 %% Starts the supervisor
@@ -61,11 +70,8 @@ start_link() ->
   ignore |
   {error, Reason :: term()}).
 init([]) ->
-  SupFlags = {simple_one_for_one, ?MAX_RESTARTS, ?MAX_SECONDS_RESTARTS},
-  ProcCache = {proc_table, {proc_table, start_link, []},
-    transient, infinity, worker, [proc_table]},
-
-  {ok, {SupFlags, [ProcCache]}}.
+  SupFlags = {one_for_one, ?MAX_RESTARTS, ?MAX_SECONDS_RESTARTS},
+  {ok, {SupFlags, []}}.
 
 %%%===================================================================
 %%% Internal functions

@@ -30,3 +30,5 @@
 -define(ER_RESULT_FORMAT_ERROR, result_format_error).
 -define(ER_UPDATE_ELEMENT_NOT_FOUND, update_element_not_found).
 -define(ER_UPDATE_IGNORE_ELEMENT, update_ignore_element).
+
+-define(ER_MGR_START_CHILDREN_ERROR, mgr_start_children_error).

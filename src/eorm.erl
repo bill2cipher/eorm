@@ -14,9 +14,7 @@
   new/3,
   close/1,
   lookup/2,
-  insert/2,
-  insert_new/2,
-  delete/2
+  insert/2
 ]).
 
 -spec(new(Table::atom(), Spec :: spec(), Opts::list()) ->
@@ -49,20 +47,3 @@ insert(Table, Data) ->
     {error, Reason} -> {error, Reason};
     {ok, Ref} -> eorm_mod_table:insert(Ref, Data)
   end.
-
--spec(insert_new(Table::atom(), Data::data()) ->
-  {error, any()} | ok).
-insert_new(Table, Data) ->
-  case eorm_server:get_table(Table) of
-    {error, Reason} -> {error, Reason};
-    {ok, Ref} -> eorm_mod_table:insert_new(Ref, Data)
-  end.
-
--spec(delete(Table::atom(), Key::any()) ->
-  {error, any()} | ok).
-delete(Table, Key) ->
-  case eorm_server:get_table(Table) of
-    {error, Reason} -> {error, Reason};
-    {ok, Ref} -> eorm_mod_table:delete(Ref, Key)
-  end.
-

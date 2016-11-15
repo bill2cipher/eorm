@@ -13,7 +13,8 @@
   type :: tuple | map,
   fields :: {integer(), string(), undefined} | {integer(), ignore, any()},
   key :: integer(),
-  module :: {module(), binary()}
+  module :: {module(), binary()},
+  proc_cnt :: integer()
 }).
 
 -type spec() :: #data_spec{}.

@@ -37,8 +37,8 @@ start_link() ->
 %% Child :: {Id,StartFunc,Restart,Shutdown,Type,Modules}
 init([]) ->
   SupFlags = {one_for_one, ?MAX_RESTARTS, ?MAX_SECONDS_RESTARTS},
-  SupCache = {sup_table, {sup_table, start_link, []},
-    transient, infinity, supervisor, [sup_table]},
+  SupCache = {eorm_sup_table, {eorm_sup_table, start_link, []},
+    transient, infinity, supervisor, [eorm_sup_table]},
   EormServer = {eorm_server, {eorm_server, start_link, []},
     transient, infinity, worker, [eorm_server]},
   {ok, {SupFlags, [SupCache, EormServer]}}.

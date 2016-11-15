@@ -17,7 +17,8 @@
   new_table/3,
   close_table/1,
   get_table/1,
-  update_table_status/2
+  update_table_status/2,
+  update_part_ref/2
 ]).
 %% gen_server callbacks
 -export([init/1,
@@ -86,6 +87,10 @@ get_table(Table) when is_atom(Table) ->
 -spec(update_table_status(Table::atom(), Status::table_status()) -> ok).
 update_table_status(Table, Status) when is_atom(Table) andalso is_atom(Status) ->
   gen_server:cast(?SERVER, {update_status, Table, Status}),
+  ok.
+
+update_part_ref(Table, ID) ->
+  gen_server:cast(?SERVER, {update_part_status, Table, ID, self()}),
   ok.
 
 %%%===================================================================

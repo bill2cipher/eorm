@@ -33,10 +33,9 @@
 -define(MAX_SECONDS_RESTARTS, 30).
 -define(CACHE_DIR, "/tmp/mgame/cache/").
 
+-define(DBModule, eorm_mod_mysql).
 -define(DB_ACTION_LOOKUP, lookup).
 -define(DB_ACTION_INSERT, insert).
--define(DB_ACTION_DELETE, delete).
--define(DB_ACTION_UPDATE, update).
 
 
 -type table_status() :: init | run | close.
@@ -46,8 +45,9 @@
 -define(TABLE_STATUS_DOWN, down).
 
 -record(table_ref, {name, pid, spec, status}).
+-record(part_table_ref, {id, pid, spec, status}).
 
--record(data_cache, {key, data, ts}).
--record(exec_info, {key, xmit, resent_ts, data, action}).
+-record(data_cache, {key, data, ts, ver}).
+-record(exec_info, {key, xmit, resent_ts, data, action, ver}).
 -record(db_ok_rslt, {}).
 -record(db_data_rslt, {fields, rows}).

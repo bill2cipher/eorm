@@ -43,15 +43,15 @@ sort_fields(Spec = #data_spec{fields = Fields, type = tuple}) ->
 sort_fields(Spec = #data_spec{}) -> Spec.
 
 -spec(check_spec(Spec::spec()) -> {false, any()} | true).
-check_spec(Spec = #data_spec{name = TableName, fields = Fields, key = Key, module = Module, type = tuple}) ->
-  case is_list(TableName) andalso is_list(Fields) andalso is_integer(Key) andalso is_tuple(Module) of
+check_spec(Spec = #data_spec{name = TableName, fields = Fields, key = Key, module = Module, type = tuple, proc_cnt = Cnt}) ->
+  case is_list(TableName) andalso is_list(Fields) andalso is_integer(Key) andalso is_tuple(Module) andalso is_integer(Cnt) of
     false -> {false, ?ER_SPEC_FIELD_TYPE_ERROR};
     true  ->
       CheckList = [fun check_tuple_fields/1, fun check_spec_key/1, fun check_spec_module/1],
       check_spec_proc(CheckList, Spec)
   end;
-check_spec(Spec = #data_spec{name = TableName, fields = Fields, key = Key, module = Module, type = map}) ->
-  case is_list(TableName) andalso is_list(Fields) andalso is_atom(Key) andalso is_tuple(Module) of
+check_spec(Spec = #data_spec{name = TableName, fields = Fields, key = Key, module = Module, type = map, proc_cnt = Cnt}) ->
+  case is_list(TableName) andalso is_list(Fields) andalso is_atom(Key) andalso is_tuple(Module) andalso is_integer(Cnt) of
     false -> {false, ?ER_SPEC_FIELD_TYPE_ERROR};
     true  ->
       CheckList = [fun check_map_fields/1, fun check_spec_key/1, fun check_spec_module/1],

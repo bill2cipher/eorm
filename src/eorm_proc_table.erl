@@ -12,7 +12,8 @@
 -behaviour(gen_server).
 
 %% API
--export([start_link/3]).
+-export([start_link/3,
+  proc_execinfo/2]).
 
 %% gen_server callbacks
 -export([init/1,
@@ -25,18 +26,15 @@
 -define(SERVER, ?MODULE).
 
 -record(state, {
+  id :: integer(),
   name :: atom(),
   spec :: spec(),
   ets  :: ets:tab(),
   dets :: dets:tab_name(),
-  status  :: table_status(),
-  key_ets :: ets:tab(),
-  db_module :: module(),
+  mgr_pid :: pid(),
 
   lookup  :: string(),
-  replace :: string(),
-  delete  :: string(),
-  update  :: string()
+  replace :: string()
 }).
 
 %%%===================================================================
@@ -49,10 +47,10 @@
 %%
 %% @end
 %%--------------------------------------------------------------------
--spec(start_link(Table::atom(), Spec::spec(), Opts::list()) ->
+-spec(start_link(Table::atom(), Spec::spec(), Args::list()) ->
   {ok, Pid :: pid()} | ignore | {error, Reason :: term()}).
-start_link(Table, Spec, Opts) ->
-  gen_server:start_link({local, ?SERVER}, ?MODULE, [Table, Spec, Opts], []).
+start_link(Table, ID, Args) ->
+  gen_server:start_link({local, ?SERVER}, ?MODULE, [Table, ID, Args], []).
 
 %%%===================================================================
 %%% gen_server callbacks
@@ -72,15 +70,15 @@ start_link(Table, Spec, Opts) ->
 -spec(init(Args :: term()) ->
   {ok, State :: #state{}} | {ok, State :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term()} | ignore).
-init([Table, Spec, _Opts]) ->
-  DBModule = application:get_env(eorm, db_module, mod_mysql),
-  timer:send_after(0, self(), clean_dets),
-  State = #state{name = Table, spec = Spec, db_module = DBModule, ets = init_cache(Table),
-    status = ?TABLE_STATUS_INIT},
-  case init_table([fun init_dets/1, fun init_key_ets/1, fun init_prepare/1], State) of
-    {ok, State2} -> {ok, State2};
-    {error, Reason} -> {stop, Reason}
-  end.
+init([Table, ID, Args]) ->
+  erlang:process_flag(trap_exit, true),
+  [Spec, _, Replace, Lookup, EtsTable, DetsTable, MgrPID] = Args,
+  State = #state{name = Table, id = ID, spec = Spec, replace = Replace,
+    lookup = Lookup, ets = EtsTable, dets = DetsTable, mgr_pid = MgrPID},
+  eorm_server:update_part_ref(Table, ID),
+  ?IF(Lookup =:= undefined, ignore, eorm_lib_table:set_prepare(?DB_ACTION_LOOKUP, Lookup)),
+  ?IF(Replace =:= undefined, ignore, eorm_lib_table:set_prepare(?DB_ACTION_INSERT, Replace)),
+  {ok, State}.
 
 %%--------------------------------------------------------------------
 %% @private
@@ -97,66 +95,28 @@ init([Table, Spec, _Opts]) ->
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), Reply :: term(), NewState :: #state{}} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_call(_, _, State = #state{status = ?TABLE_STATUS_INIT}) ->
-  {reply, {error, ?ER_TABLE_STATUS_NOT_RUN}, State};
-handle_call(_, _, State = #state{status = ?TABLE_STATUS_CLOSE}) ->
-  {reply, {error, ?ER_TABLE_STATUS_NOT_RUN}, State};
 handle_call({lookup, Key, Current}, _From, State) ->
-  case ets:lookup(State#state.key_ets, Key) of
-    [] -> {reply, {ok, undefined}, State};
-    _  ->
-      case proc_lookup(State, Key) of
-        {ok, Data} ->
-          ets:update_element(State#state.ets, Key, [{#data_cache.ts, Current}]),
-          {reply, {ok, Data}, State};
-        Error -> {reply, Error, State}
-      end
+  case proc_lookup(State, Key) of
+    {ok, Data} ->
+      ets:update_element(State#state.ets, Key, [{#data_cache.ts, Current}]),
+      {reply, {ok, Data}, State};
+    Error -> {reply, Error, State}
   end;
 handle_call({insert, Data, Current}, _From, State) ->
-  #state{key_ets = KeyTable, ets = EtsTable, dets = DetsTable, spec = Spec} = State,
-  KeyValue = lib_spec:key_value(Spec, Data),
-  ets:insert(KeyTable, {KeyValue, true}),
-  ets:insert(EtsTable, #data_cache{key = KeyValue, ts = Current, data = Data}),
-  dets:insert(DetsTable, #exec_info{key = KeyValue, xmit = 0, resent_ts = Current,
-    data = Data, action = ?DB_ACTION_INSERT}),
+  #state{ets = EtsTable, dets = DetsTable, spec = Spec} = State,
+  KeyValue = eorm_lib_spec:key_value(Spec, Data),
+  Version = case ets:lookup_element(EtsTable, KeyValue, #data_cache.ver) of
+    [] -> 1;
+    [V] -> V + 1
+  end,
+  ets:insert(EtsTable, #data_cache{key = KeyValue, ts = Current, data = Data, ver = Version}),
+  Info = #exec_info{key = KeyValue, xmit = 0, resent_ts = Current, data = Data, ver = Version,
+    action = ?DB_ACTION_INSERT},
+  case proc_execinfo(Info, Spec) of
+    {ok, _, _} -> ignore;
+    {error, _} -> dets:insert(DetsTable, Info)
+  end,
   {reply, ok, State};
-handle_call({insert_new, Data, Current}, _From, State) ->
-  #state{key_ets = KeyTable, ets = EtsTable, dets = DetsTable, spec = Spec} = State,
-  KeyValue = lib_spec:key_value(Spec, Data),
-  case ets:lookup(KeyTable, KeyValue) of
-    [{KeyValue, true}] -> {reply, {error, ?ER_DATA_EXIST}, State};
-    _ ->
-      ets:insert(KeyTable, {KeyValue, true}),
-      ets:insert(EtsTable, #data_cache{key = KeyValue, ts = Current, data = Data}),
-      dets:insert(DetsTable, #exec_info{key = KeyValue, xmit = 0, resent_ts = Current,
-        data = Data, action = ?DB_ACTION_INSERT}),
-      {reply, ok, State}
-  end;
-handle_call({delete, Key, Current}, _From, State) ->
-  #state{key_ets = KeyTable, ets = EtsTable, dets = DetsTable} = State,
-  case ets:lookup(KeyTable, Key) of
-    [] -> {reply, ok, State};
-    _  ->
-      ets:delete(KeyTable, Key),
-      ets:delete(EtsTable, Key),
-      dets:insert(DetsTable, #exec_info{key = Key, xmit = 0, resent_ts = Current, action = ?DB_ACTION_DELETE}),
-      {reply, ok, State}
-  end;
-handle_call({update_element, Key, ElementSpec, Current}, _From, State) ->
-  #state{key_ets = KeyTable, ets = EtsTable, dets = DetsTable} = State,
-  case ets:lookup(KeyTable, Key) of
-    [] -> {reply, {error, ?ER_DATA_NOT_EXIST}, State};
-    _  ->
-      case proc_lookup(State, Key) of
-        {ok, undefined} -> {reply, {error, ?ER_DATA_NOT_EXIST}, State};
-        {ok, Data} ->
-          Data2 = lib_table:update_data(Data, ElementSpec),
-          ets:update_element(EtsTable, Key, [{#data_cache.ts, Current}, {#data_cache.data, Data2}]),
-          dets:insert(DetsTable, #exec_info{key = Key, xmit = 0, resent_ts = Current,
-            data = ElementSpec, action = ?DB_ACTION_UPDATE}),
-          {reply, {ok, Data2}, State}
-      end
-  end;
 handle_call(_Request, _From, State) ->
   {reply, ok, State}.
 
@@ -171,10 +131,6 @@ handle_call(_Request, _From, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_cast({stop, Reason}, State = #state{name = Name}) ->
-  ?INFO("table ~p process shutdown, reason ~p", [Name, Reason]),
-  State2 = proc_flush(State),
-  {stop, {shutdown, Reason}, State2};
 handle_cast(_Request, State) ->
   {noreply, State}.
 
@@ -192,15 +148,12 @@ handle_cast(_Request, State) ->
   {noreply, NewState :: #state{}} |
   {noreply, NewState :: #state{}, timeout() | hibernate} |
   {stop, Reason :: term(), NewState :: #state{}}).
-handle_info(clean_dets, State) ->
-  State2 = proc_flush(State),
-  timer:send_after(?FLUSH_INTERVAL, self(), flush),
-  eorm_server:update_table_status(State#state.name, ?TABLE_STATUS_RUN),
-  {noreply, State2#state{status = ?TABLE_STATUS_RUN}};
-handle_info(flush, State) ->
-  State2 = proc_flush(State),
-  timer:send_after(?FLUSH_INTERVAL, self(), flush),
-  {noreply, State2};
+handle_info({stop, Reason}, State = #state{name = Name, id = ID}) ->
+  ?INFO("table ~p id ~p process shutdown, reason ~p", [Name, ID, Reason]),
+  {stop, {shutdown, Reason}, State};
+handle_info({'EXIT', From, Reason}, State = #state{mgr_pid = From, name = Table}) ->
+  ?ERROR("table ~p mgr process ~p exit, reason ~p, stopping proc table", [Table, From, Reason]),
+  {stop, shutdown, State};
 handle_info(_Info, State) ->
   {noreply, State}.
 
@@ -237,59 +190,6 @@ code_change(_OldVsn, State, _Extra) ->
 %%%===================================================================
 %%% Internal functions
 %%%===================================================================
--spec(init_table(Funs::list(), State::#state{}) -> {ok, #state{}} | {error, any()}).
-init_table([], State) -> {ok, State};
-init_table([F|L], State) ->
-  case F(State) of
-    {ok, State2} -> init_table(L, State2);
-    Error -> Error
-  end.
-
--spec(init_cache(Table::atom()) -> ets:tab()).
-init_cache(Table) ->
-  ets:new(Table, [{keypos, #data_cache.key}]).
-
--spec(init_dets(State::#state{}) -> {error, any()} | {ok, #state{}}).
-init_dets(State = #state{name = Table}) ->
-  Dir = application:get_env(eorm, cache_dir, ?CACHE_DIR),
-  TableFile = Dir ++ "/" ++ atom_to_list(Table),
-  case dets:open_file(Table, [{file, TableFile}, {keypos, #data_cache.key}]) of
-    {ok, DetsTable} -> {ok, State#state{dets = DetsTable}};
-    Error -> Error
-  end.
-
--spec(init_key_ets(State::#state{}) -> {error, any()} | {ok, #state{}}).
-init_key_ets(State = #state{name = Table, spec = Spec, db_module = DBModule}) ->
-  KeyTable = ets:new(Table, [{keypos, 1}]),
-  case lib_db:load_keys(DBModule, Spec) of
-    {ok, Rows} ->
-      [ets:insert(KeyTable, {K, true}) || [K] <- Rows],
-      {ok, State#state{key_ets = KeyTable}};
-    Error -> Error
-  end.
-
--spec(init_prepare(State::#state{}) -> {ok, #state{}}).
-init_prepare(State) ->
-  #state{db_module = DBModule, spec = Spec} = State,
-  Lookup = case lib_db:prepare(DBModule, ?DB_ACTION_LOOKUP, Spec) of
-    {ok, LN} -> lib_table:set_prepare(?DB_ACTION_LOOKUP, LN), LN;
-    _ -> undefined
-  end,
-  Insert = case lib_db:prepare(DBModule, ?DB_ACTION_INSERT, Spec) of
-    {ok, IN} -> lib_table:set_prepare(?DB_ACTION_INSERT, IN), IN;
-    _ -> undefined
-  end,
-  Update = case lib_db:prepare(DBModule, ?DB_ACTION_UPDATE, Spec) of
-    {ok, UN} -> lib_table:set_prepare(?DB_ACTION_UPDATE, UN), UN;
-    _ -> undefined
-  end,
-  Delete = case lib_db:prepare(DBModule, ?DB_ACTION_DELETE, Spec) of
-    {ok, DN} -> lib_table:set_prepare(?DB_ACTION_DELETE, DN), DN;
-    _ -> undefined
-  end,
-  {ok, State#state{lookup = Lookup, delete = Delete, update = Update, replace = Insert}}.
-
-
 -spec(proc_lookup(State::#state{}, Key::any()) ->
   {error, any()} | {ok, undefined} | {ok, term()}).
 proc_lookup(State = #state{ets = EtsTable}, Key) ->
@@ -300,51 +200,26 @@ proc_lookup(State = #state{ets = EtsTable}, Key) ->
 
 -spec(proc_db_lookup(State::#state{}, Key::any()) ->
   {error, any()} | {ok, undefined} | {ok, term()}).
-proc_db_lookup(#state{lookup = Lookup, db_module = DBModule, ets = EtsTable, spec = Spec}, Key) ->
+proc_db_lookup(#state{lookup = Lookup, ets = EtsTable, spec = Spec}, Key) ->
   Rslt = case Lookup of
-    undefined -> lib_db:execute(DBModule, Spec, #exec_info{key = Key});
-    _ -> lib_db:exec_prepare(DBModule, Lookup, Spec, #exec_info{key = Key})
+    undefined -> eorm_lib_db:execute(Spec, #exec_info{key = Key, action = ?DB_ACTION_LOOKUP});
+    _ -> eorm_lib_db:exec_prepare(Lookup, Spec, #exec_info{key = Key, action = ?DB_ACTION_LOOKUP})
   end,
   case Rslt of
     {ok, #db_data_rslt{}} ->
-      Data = lib_table:build_data(Spec, Rslt),
+      Data = eorm_lib_table:build_data(Spec, Rslt),
       ets:insert(EtsTable, #data_cache{key = Key, data = Data}), {ok, Data};
     {ok, #db_ok_rslt{}} ->
       {error, ?ER_RESULT_FORMAT_ERROR};
     Error -> Error
   end.
 
--spec(proc_flush(State::#state{}) -> #state{}).
-proc_flush(State = #state{dets = DetsTable}) ->
-  case dets:match(DetsTable, '$1', ?FLUSH_PROC_CNT) of
-    '$end_of_table' -> ignore;
-    {error, Reason} ->
-      ?ERROR("dets ~p match failed, reason ~p", [DetsTable, Reason]);
-    {Infos, Cont} ->
-      Finished = proc_flush2(State, Infos, Cont, []),
-      ?DEBUG("proc flush success for ~p", [Finished]),
-      [dets:delete(DetsTable, K) || K <- Finished]
-  end,
-  State.
-
-proc_flush2(State = #state{dets = DetsTable, db_module = DBModule, spec = Spec}, Infos, Cont, Finished) ->
-  ExecRslt = [proc_flush3(I, DBModule, Spec) || [I] <- Infos],
-  Finished2 = [K || {ok, K} <- ExecRslt] ++ Finished,
-  case dets:match(Cont) of
-    '$end_of_table' -> Finished2;
-    {error, Reason} ->
-      ?ERROR("dets ~p match failed, reason ~p", [DetsTable, Reason]),
-      Finished2;
-    {Infos2, Cont2} ->
-      proc_flush2(State, Infos2, Cont2, Finished2)
-  end.
-
-proc_flush3(Info = #exec_info{action = Action, key = Key}, DBModule, Spec) ->
-  Rslt = case lib_table:get_prepare(Action) of
-    undefined -> lib_db:execute(DBModule, Spec, Info);
-    Prepare   -> lib_db:exec_prepare(DBModule, Prepare, Spec, Info)
+proc_execinfo(Info = #exec_info{action = Action, key = Key, ver = Ver}, Spec) ->
+  Rslt = case eorm_lib_table:get_prepare(Action) of
+    undefined -> eorm_lib_db:execute(Spec, Info);
+    Prepare   -> eorm_lib_db:exec_prepare(Prepare, Spec, Info)
   end,
   case Rslt of
-    {ok, _} -> {ok, Key};
-    _  -> {error, Key}
+    {ok, _} -> {ok, Key, Ver};
+    Error   -> Error
   end.
